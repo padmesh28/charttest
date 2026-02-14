@@ -1,0 +1,11 @@
+NiFi Registry is deployed.
+
+Get URL (port-forward):
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "nifi-registry.fullname" . }} 18080:{{ ternary .Values.listener.httpsPort .Values.listener.httpPort (eq .Values.listener.mode "https") }}
+
+Then open:
+{{- if eq .Values.listener.mode "https" }}
+  https://127.0.0.1:18080/nifi-registry
+{{- else }}
+  http://127.0.0.1:18080/nifi-registry
+{{- end }}

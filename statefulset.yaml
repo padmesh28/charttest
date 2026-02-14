@@ -1,0 +1,226 @@
+apiVersion: apps/v1
+kind: StatefulSet
+{{- if not (or (eq .Values.listener.mode "http") (eq .Values.listener.mode "https")) }}
+{{- fail "listener.mode must be either 'http' or 'https'" }}
+{{- end }}
+{{- if and .Values.certManager.enabled (ne .Values.listener.mode "https") }}
+{{- fail "certManager.enabled=true requires listener.mode=https" }}
+{{- end }}
+{{- if and .Values.certManager.enabled (eq .Values.certManager.clusterIssuer "") }}
+{{- fail "certManager.clusterIssuer is required when certManager.enabled=true" }}
+{{- end }}
+{{- if and .Values.certManager.enabled (eq .Values.certManager.jks.passwordSecretName "") }}
+{{- fail "certManager.jks.passwordSecretName is required when certManager.enabled=true" }}
+{{- end }}
+metadata:
+  name: {{ include "nifi-registry.fullname" . }}
+  labels:
+    {{- include "nifi-registry.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "nifi-registry.selectorLabels" . | nindent 6 }}
+  serviceName: {{ include "nifi-registry.fullname" . }}
+  template:
+    metadata:
+    {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      labels:
+        {{- include "nifi-registry.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "nifi-registry.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if or .Values.persistence.enabled .Values.certManager.enabled }}
+      initContainers:
+      {{- if .Values.persistence.enabled }}
+        - name: take-data-dir-ownership
+          image: "{{ .Values.initContainers.alpine.image }}:{{ .Values.initContainers.alpine.tag }}"
+          command: ["chown", "-R", "1000:1000", "/opt/nifi-registry/nifi-registry-current/database", "/opt/nifi-registry/nifi-registry-current/flow_storage"]
+          volumeMounts:
+            - name: database
+              mountPath: /opt/nifi-registry/nifi-registry-current/database
+            - name: flow-storage
+              mountPath: /opt/nifi-registry/nifi-registry-current/flow_storage
+              subPath: flow_storage
+      {{- end }}
+      {{- if .Values.certManager.enabled }}
+        - name: build-jks
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - bash
+            - -ceu
+            - |
+              openssl pkcs12 -export \
+                -in /certs/tls.crt \
+                -inkey /certs/tls.key \
+                -name nifi-registry \
+                -out /jks/keystore.p12 \
+                -passout "pass:${KEYSTORE_PASSWORD}"
+              keytool -importkeystore -noprompt \
+                -srckeystore /jks/keystore.p12 \
+                -srcstoretype PKCS12 \
+                -srcstorepass "${KEYSTORE_PASSWORD}" \
+                -destkeystore /jks/keystore.jks \
+                -deststoretype JKS \
+                -deststorepass "${KEYSTORE_PASSWORD}"
+              keytool -import -noprompt -trustcacerts \
+                -alias ca \
+                -file /certs/ca.crt \
+                -keystore /jks/truststore.jks \
+                -storepass "${TRUSTSTORE_PASSWORD}"
+              rm -f /jks/keystore.p12
+          env:
+            - name: KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.certManager.jks.passwordSecretName }}
+                  key: {{ .Values.certManager.jks.keystorePasswordKey }}
+            - name: TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.certManager.jks.passwordSecretName }}
+                  key: {{ .Values.certManager.jks.truststorePasswordKey }}
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /certs
+              readOnly: true
+            - name: tls-jks
+              mountPath: /jks
+      {{- end }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["bin/nifi-registry.sh", "stop"]
+          ports:
+            - name: {{ .Values.listener.mode }}
+              containerPort: {{ ternary .Values.listener.httpsPort .Values.listener.httpPort (eq .Values.listener.mode "https") }}
+              protocol: TCP
+          {{- if or .Values.flowProvider.git.enabled .Values.extraEnvs }}
+          env:
+          {{- end }}
+          {{- if .Values.flowProvider.git.enabled }}
+            - name: NIFI_REGISTRY_FLOW_PROVIDER
+              value: git
+            - name: NIFI_REGISTRY_GIT_REMOTE
+              value: {{ .Values.flowProvider.git.remote | quote }}
+            - name: NIFI_REGISTRY_GIT_USER
+              value: {{ .Values.flowProvider.git.user | quote }}
+            - name: NIFI_REGISTRY_GIT_PASSWORD
+            {{- if .Values.flowProvider.git.passwordSecretName }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.flowProvider.git.passwordSecretName }}
+                  key: {{ default "token" .Values.flowProvider.git.passwordSecretKey }}
+            {{- else }}
+              value: {{ .Values.flowProvider.git.password | quote }}
+            {{- end }}
+            - name: NIFI_REGISTRY_GIT_REPO
+              value: {{ .Values.flowProvider.git.url | quote }}
+          {{- end }}
+          {{- if .Values.extraEnvs }}
+            {{ toYaml .Values.extraEnvs | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            {{- if .Values.persistence.enabled }}
+            - name: database
+              mountPath: /opt/nifi-registry/nifi-registry-current/database
+            - name: flow-storage
+              mountPath: /opt/nifi-registry/nifi-registry-current/flow_storage
+              subPath: flow_storage
+            {{- end }}
+            {{- if .Values.flowProvider.git.config.enabled }}
+            - name: git-config
+              mountPath: /home/nifi/.gitconfig
+              subPath: gitconfig
+              readOnly: true
+            {{- end }}
+            - name: ldap-config
+              mountPath: /opt/nifi-registry/nifi-registry-current/conf/authorizers.xml
+              subPath: authorizers.xml
+              readOnly: true
+            - name: ldap-config
+              mountPath: /opt/nifi-registry/nifi-registry-current/conf/identity-providers.xml
+              subPath: identity-providers.xml
+              readOnly: true
+            - name: ldap-config
+              mountPath: /opt/nifi-registry/nifi-registry-current/conf/nifi-registry.properties
+              subPath: nifi-registry.properties
+              readOnly: true
+            {{- if .Values.certManager.enabled }}
+            - name: tls-jks
+              mountPath: /opt/nifi-registry/nifi-registry-current/tls
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.listener.mode }}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 1
+            successThreshold: 2
+            failureThreshold: 3
+      volumes:
+      {{- if .Values.flowProvider.git.config.enabled }}
+      - name: git-config
+        secret:
+          secretName: {{ include "flowProvider.git.config.secretName" . }}
+          defaultMode: 0444
+      {{- end }}
+      - name: ldap-config
+        configMap:
+          name: {{ include "nifi-registry.ldap.configMapName" . }}
+          defaultMode: 0444
+      {{- if .Values.certManager.enabled }}
+      - name: tls-certs
+        secret:
+          secretName: {{ include "nifi-registry.tls.secretName" . }}
+      - name: tls-jks
+        emptyDir: {}
+      {{- end }}
+  {{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+  - metadata:
+      name: database
+    spec:
+      accessModes:
+      - {{ .Values.persistence.database.accessMode | quote }}
+      {{- if .Values.persistence.database.storageClass }}
+      {{- if (eq "-" .Values.persistence.database.storageClass) }}
+      storageClassName: ""
+      {{- else }}
+      storageClassName: "{{ .Values.persistence.database.storageClass }}"
+      {{- end }}
+      {{- end }}
+      resources:
+        requests:
+          storage: {{ .Values.persistence.database.size | quote }}
+  - metadata:
+      name: flow-storage
+    spec:
+      accessModes:
+      - {{ .Values.persistence.flowStorage.accessMode | quote }}
+      {{- if .Values.persistence.flowStorage.storageClass }}
+      {{- if (eq "-" .Values.persistence.flowStorage.storageClass) }}
+      storageClassName: ""
+      {{- else }}
+      storageClassName: "{{ .Values.persistence.flowStorage.storageClass }}"
+      {{- end }}
+      {{- end }}
+      resources:
+        requests:
+          storage: {{ .Values.persistence.flowStorage.size | quote }}
+  {{- end }}

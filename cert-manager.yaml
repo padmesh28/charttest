@@ -1,0 +1,26 @@
+{{- if .Values.certManager.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "nifi-registry.tls.secretName" . }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  secretName: {{ include "nifi-registry.tls.secretName" . }}
+  issuerRef:
+    kind: ClusterIssuer
+    name: {{ .Values.certManager.clusterIssuer }}
+  {{- if .Values.certManager.duration }}
+  duration: {{ .Values.certManager.duration }}
+  {{- end }}
+  {{- if .Values.certManager.renewBefore }}
+  renewBefore: {{ .Values.certManager.renewBefore }}
+  {{- end }}
+  commonName: {{ include "nifi-registry.fullname" . }}.{{ .Release.Namespace }}.svc.{{ .Values.certManager.clusterDomain }}
+  dnsNames:
+    - {{ include "nifi-registry.fullname" . }}
+    - {{ include "nifi-registry.fullname" . }}.{{ .Release.Namespace }}.svc
+    - {{ include "nifi-registry.fullname" . }}.{{ .Release.Namespace }}.svc.{{ .Values.certManager.clusterDomain }}
+  {{- range .Values.certManager.dnsNames }}
+    - {{ . }}
+  {{- end }}
+{{- end }}

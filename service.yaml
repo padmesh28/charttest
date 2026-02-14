@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nifi-registry.fullname" . }}
+  labels:
+    {{- include "nifi-registry.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ ternary .Values.listener.httpsPort .Values.listener.httpPort (eq .Values.listener.mode "https") }}
+      protocol: TCP
+      targetPort: {{ .Values.listener.mode }}
+      name: {{ .Values.listener.mode }}
+  selector:
+    {{- include "nifi-registry.selectorLabels" . | nindent 4 }}
