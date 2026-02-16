@@ -96,5 +96,12 @@ flowProvider:
 # - nifi-registry.properties
 ldap:
   configMapName: "nifi-registry-ldap-config"
+  # true: chart creates the ConfigMap below
+  # false: use existing external ConfigMap (configMapName)
+  create: false
+  data:
+    authorizersXml: ""
+    identityProvidersXml: ""
+    nifiRegistryProperties: ""
 
 extraEnvs: []
