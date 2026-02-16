@@ -1,0 +1,16 @@
+{{- if .Values.ldap.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nifi-registry.ldap.configMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nifi-registry.labels" . | nindent 4 }}
+data:
+  authorizers.xml: |
+{{- .Values.ldap.data.authorizersXml | nindent 4 }}
+  identity-providers.xml: |
+{{- .Values.ldap.data.identityProvidersXml | nindent 4 }}
+  nifi-registry.properties: |
+{{- .Values.ldap.data.nifiRegistryProperties | nindent 4 }}
+{{- end }}
