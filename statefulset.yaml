@@ -40,6 +40,8 @@ spec:
         - name: take-data-dir-ownership
           image: "{{ .Values.initContainers.alpine.image }}:{{ .Values.initContainers.alpine.tag }}"
           command: ["chown", "-R", "1000:1000", "/opt/nifi-registry/nifi-registry-current/database", "/opt/nifi-registry/nifi-registry-current/flow_storage"]
+          resources:
+            {{- toYaml .Values.initContainers.resources.ownership | nindent 12 }}
           volumeMounts:
             - name: database
               mountPath: /opt/nifi-registry/nifi-registry-current/database
@@ -51,6 +53,8 @@ spec:
         - name: build-jks
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          resources:
+            {{- toYaml .Values.initContainers.resources.jks | nindent 12 }}
           command:
             - bash
             - -ceu
