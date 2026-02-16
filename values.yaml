@@ -9,6 +9,21 @@ initContainers:
   alpine:
     image: alpine
     tag: "3.20"
+  resources:
+    ownership:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    jks:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
 
 nameOverride: ""
 fullnameOverride: ""
@@ -96,12 +111,5 @@ flowProvider:
 # - nifi-registry.properties
 ldap:
   configMapName: "nifi-registry-ldap-config"
-  # true: chart creates the ConfigMap below
-  # false: use existing external ConfigMap (configMapName)
-  create: false
-  data:
-    authorizersXml: ""
-    identityProvidersXml: ""
-    nifiRegistryProperties: ""
 
 extraEnvs: []
